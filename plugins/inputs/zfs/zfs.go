@@ -10,13 +10,18 @@ import (
 
 type Sysctl func(metric string) ([]string, error)
 type Zpool func() ([]string, error)
+type ZpoolIostat func(out chan string, outErr chan error)
 
 type Zfs struct {
-	KstatPath    string
-	KstatMetrics []string
-	PoolMetrics  bool
-	sysctl       Sysctl
-	zpool        Zpool
+	KstatPath         string
+	KstatMetrics      []string
+	PoolMetrics       bool
+	PoolIostatMetrics bool
+	sysctl            Sysctl
+	zpool             Zpool
+	zpoolIostat       ZpoolIostat
+	zpoolIostatSource chan string
+	zpoolIostatError  chan error
 }
 
 var sampleConfig = `
@@ -31,7 +36,10 @@ var sampleConfig = `
   # kstatMetrics = ["abdstats", "arcstats", "dnodestats", "dbufcachestats",
   #   "dmu_tx", "fm", "vdev_mirror_stats", "zfetchstats", "zil"]
   ## By default, don't gather zpool stats
+  ## Before turning it on, please, check that zpool is available from $PATH
   # poolMetrics = false
+  ## By default, don't gather zpool stats
+  # poolIostatMetrics = false
 `
 
 func (z *Zfs) SampleConfig() string {
@@ -117,7 +125,6 @@ func (z *Zfs) getZpoolStats() (map[string]map[string]interface{}, error) {
 		}
 		poolFields[name] = fields
 	}
-
 	return poolFields, nil
 }
 
@@ -135,6 +142,9 @@ func run(command string, args ...string) ([]string, error) {
 	stdout := strings.TrimSpace(outbuf.String())
 	stderr := strings.TrimSpace(errbuf.String())
 
+	if execErr, ok := err.(*exec.Error); ok {
+		return nil, fmt.Errorf("%s was not found or not executable. Wrapped error: %s", execErr.Name, execErr.Err)
+	}
 	if _, ok := err.(*exec.ExitError); ok {
 		return nil, fmt.Errorf("%s error: %s", command, stderr)
 	}

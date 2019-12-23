@@ -4,6 +4,7 @@ package zfs
 
 import (
 	"io/ioutil"
+	"strings"
 	"os"
 	"testing"
 
@@ -627,3 +628,82 @@ func getPoolUnavailMetrics() map[string]interface{} {
 		"size":     int64(0),
 	}
 }
+
+//zpool iostat -Hp -l -q -y 1
+const zpoolIostatContents = `
+rpool	203525095936	116449967616	0	238	0	1612537	-	143137	-	69820	-	3456	-	82830	-	0	0	0	0	0	0	0	0	0	0
+zd01	1041502023680	14901416579072	0	1491	0	164485664	-	77190832	-	5273927	-	4608	-	72408643	-	0	0	0	0	0	0	184	4	0	0
+rpool	203525095936	116449967616	0	0	0	0	-	-	-	-	-	-	-	-	-	0	0	0	0	0	0	0	0	0	0
+zd01	1041502023680	14901416579072	0	1510	0	165553394	-	74766449	-	5269671	-	3328	-	69849836	-	0	0	0	0	0	0	248	6	0	0
+rpool	203525095936	116449967616	0	0	0	0	-	-	-	-	-	-	-	-	-	0	0	0	0	0	0	0	0	0	0
+zd01	1041502023680	14901416579072	0	1476	0	167216354	-	61012954	-	5416006	-	3840	-	56158448	-	0	0	0	0	0	0	271	8	0	0
+rpool	203525095936	116449967616	0	0	0	0	-	-	-	-	-	-	-	-	-	0	0	0	0	0	0	0	0	0	0
+zd01	1041502023680	14901416579072	0	1471	0	163783365	-	80763358	-	5747755	-	4224	-	75404145	-	0	0	0	0	0	0	291	8	0	0
+rpool	203525095936	116449967616	0	0	0	0	-	-	-	-	-	-	-	-	-	0	0	0	0	0	0	0	0	0	0
+zd01	1041502023680	14901416579072	0	1184	0	133041318	-	76985756	-	6452099	-	3072	-	70534877	-	0	0	0	0	0	0	211	6	0	0
+rpool	203523718144	116451345408	0	273	0	1699656	-	169797	-	68276	-	3072	-	103372	-	0	0	0	0	0	0	0	0	0	0
+zd01	1041502023680	14901416579072	0	1275	0	141177045	-	76358227	-	6738397	-	4608	-	70201298	-	0	0	0	0	0	0	226	8	0	0
+rpool	203523718144	116451345408	0	0	0	0	-	-	-	-	-	-	-	-	-	0	0	0	0	0	0	0	0	0	0
+zd01	1041502023680	14901416579072	0	7966	0	1001163487	-	117373966	-	1161228	-	6144	-	116303952	-	0	0	0	0	0	0	4559	12	0	0
+rpool	203523718144	116451345408	0	0	0	0	-	-	-	-	-	-	-	-	-	0	0	0	0	0	0	0	0	0	0
+zd01	1041502023680	14901416579072	0	8009	0	1014721417	-	251578050	-	1199958	-	3072	-	250375641	-	0	0	0	0	0	0	281	8	0	0
+rpool	203523718144	116451345408	0	0	0	0	-	-	-	-	-	-	-	-	-	0	0	0	0	0	0	0	0	0	0
+zd01	1042354585600	14900564017152	0	1338	0	113423258	-	67588940	-	4967609	-	3225	-	64129430	-	0	0	0	0	0	0	0	1	0	0
+rpool	203523718144	116451345408	0	0	0	0	-	-	-	-	-	-	-	-	-	0	0	0	0	0	0	0	0	0	0
+zd01	1042353745920	14900564856832	0	1374	0	133165167	-	62578016	-	5457761	-	2730	-	57825773	-	0	0	0	0	0	0	229	8	0	0
+`
+
+func mock_zpool_iostat(out chan string, outErr chan error) {
+	lines := strings.Split(zpoolIostatContents, "\n")
+	for _, line := range lines {
+		out <- line
+	}
+	return
+}
+
+func TestZfsPoolIostatMetrics(t *testing.T) {
+	//err := os.MkdirAll(testKstatPath, 0755)
+	//require.NoError(t, err)
+
+	//err = os.MkdirAll(testKstatPath+"/HOME", 0755)
+	//require.NoError(t, err)
+
+	//err = ioutil.WriteFile(testKstatPath+"/HOME/io", []byte(pool_ioContents), 0644)
+	//require.NoError(t, err)
+
+	//err = ioutil.WriteFile(testKstatPath+"/arcstats", []byte(arcstatsContents), 0644)
+	//require.NoError(t, err)
+
+	//poolMetrics := getPoolMetrics()
+
+	var acc testutil.Accumulator
+
+	z := &Zfs{
+		KstatPath: testKstatPath, 
+		KstatMetrics: []string{}, 
+		PoolMetrics: true,
+		PoolIostatMetrics: true,
+		zpool: mock_zpool,
+		zpoolIostat: mock_zpool_iostat,
+
+	}
+	err := z.Start(&acc)
+	require.NoError(t, err)
+	defer z.Stop()
+
+	err = z.Gather(&acc)
+	require.NoError(t, err)
+
+	//one pool, all metrics
+//	tags := map[string]string{
+//		"pool":   "HOME",
+//		"health": "ONLINE",
+//	}
+
+	//acc.AssertContainsTaggedFields(t, "zfs_pool", poolMetrics, tags)
+
+	//err = os.RemoveAll(os.TempDir() + "/telegraf")
+	//require.NoError(t, err)
+}
+
+
