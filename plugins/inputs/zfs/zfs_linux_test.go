@@ -244,186 +244,41 @@ preferred_found                 4    0
 preferred_not_found             4    43
 `
 
-var testKstatPath = os.TempDir() + "/telegraf/proc/spl/kstat/zfs"
 
 // $ zpool list -Hp -o name,health,size,alloc,free,fragmentation,capacity,dedupratio,freeing,leaked
 var zpool_output = []string{
 	"HOME	ONLINE	319975063552	202555169792	117419893760	22	63	1.00	0	0",
 	"STORAGE	ONLINE	15942918602752	1172931735552	14769986867200	12	7	1.00	0	0",
 }
-
-func mock_zpool_one_pool() ([]string, error) {
-	return zpool_output[0:1], nil
-}
-
-func mock_zpool() ([]string, error) {
-	return zpool_output, nil
-}
-
 // $ zpool list -Hp -o name,health,size,alloc,free,fragmentation,capacity,dedupratio
 var zpool_output_unavail = []string{
 	"HOME	UNAVAIL	-	-	-	-	-	-	-	-",
 }
 
-func mock_zpool_unavail() ([]string, error) {
-	return zpool_output_unavail, nil
-}
 
-func TestZfsPoolMetrics(t *testing.T) {
-	err := os.MkdirAll(testKstatPath, 0755)
-	require.NoError(t, err)
-
-	err = os.MkdirAll(testKstatPath+"/HOME", 0755)
-	require.NoError(t, err)
-
-	err = ioutil.WriteFile(testKstatPath+"/HOME/io", []byte(pool_ioContents), 0644)
-	require.NoError(t, err)
-
-	err = ioutil.WriteFile(testKstatPath+"/arcstats", []byte(arcstatsContents), 0644)
-	require.NoError(t, err)
-
-	poolMetrics := getPoolMetrics()
-
-	var acc testutil.Accumulator
-
-	z := &Zfs{KstatPath: testKstatPath, KstatMetrics: []string{"arcstats"}, zpool: mock_zpool_one_pool}
-	err = z.Gather(&acc)
-	require.NoError(t, err)
-
-	require.False(t, acc.HasMeasurement("zfs_pool"))
-	acc.Metrics = nil
-
-	z = &Zfs{KstatPath: testKstatPath, KstatMetrics: []string{"arcstats"}, PoolMetrics: true, zpool: mock_zpool_one_pool}
-	err = z.Gather(&acc)
-	require.NoError(t, err)
-
-	//one pool, all metrics
-	tags := map[string]string{
-		"pool":   "HOME",
-		"health": "ONLINE",
-	}
-
-	acc.AssertContainsTaggedFields(t, "zfs_pool", poolMetrics, tags)
-
-	err = os.RemoveAll(os.TempDir() + "/telegraf")
-	require.NoError(t, err)
-}
-
-func TestZfsGeneratesMetrics(t *testing.T) {
-	err := os.MkdirAll(testKstatPath, 0755)
-	require.NoError(t, err)
-
-	err = os.MkdirAll(testKstatPath+"/HOME", 0755)
-	require.NoError(t, err)
-
-	err = ioutil.WriteFile(testKstatPath+"/HOME/io", []byte(""), 0644)
-	require.NoError(t, err)
-
-	err = ioutil.WriteFile(testKstatPath+"/arcstats", []byte(arcstatsContents), 0644)
-	require.NoError(t, err)
-
-	err = ioutil.WriteFile(testKstatPath+"/zfetchstats", []byte(zfetchstatsContents), 0644)
-	require.NoError(t, err)
-
-	err = ioutil.WriteFile(testKstatPath+"/zil", []byte(zilContents), 0644)
-	require.NoError(t, err)
-
-	err = ioutil.WriteFile(testKstatPath+"/fm", []byte(fmContents), 0644)
-	require.NoError(t, err)
-
-	err = ioutil.WriteFile(testKstatPath+"/dmu_tx", []byte(dmu_txContents), 0644)
-	require.NoError(t, err)
-
-	err = ioutil.WriteFile(testKstatPath+"/abdstats", []byte(abdstatsContents), 0644)
-	require.NoError(t, err)
-
-	intMetrics := getKstatMetricsAll()
-
-	var acc testutil.Accumulator
-
-	//one pool, all metrics
-	tags := map[string]string{
-		"pools": "HOME",
-	}
-
-	z := &Zfs{KstatPath: testKstatPath, zpool: mock_zpool_one_pool}
-	err = z.Gather(&acc)
-	require.NoError(t, err)
-
-	acc.AssertContainsTaggedFields(t, "zfs", intMetrics, tags)
-	acc.Metrics = nil
-
-	//two pools, all metrics
-	err = os.MkdirAll(testKstatPath+"/STORAGE", 0755)
-	require.NoError(t, err)
-
-	err = ioutil.WriteFile(testKstatPath+"/STORAGE/io", []byte(""), 0644)
-	require.NoError(t, err)
-
-	tags = map[string]string{
-		"pools": "HOME::STORAGE",
-	}
-
-	z = &Zfs{KstatPath: testKstatPath, zpool: mock_zpool}
-	acc2 := testutil.Accumulator{}
-	err = z.Gather(&acc2)
-	require.NoError(t, err)
-
-	acc2.AssertContainsTaggedFields(t, "zfs", intMetrics, tags)
-	acc2.Metrics = nil
-
-	intMetrics = getKstatMetricsArcOnly()
-
-	//two pools, one metric
-	z = &Zfs{KstatPath: testKstatPath, KstatMetrics: []string{"arcstats"}, zpool: mock_zpool}
-	acc3 := testutil.Accumulator{}
-	err = z.Gather(&acc3)
-	require.NoError(t, err)
-
-	acc3.AssertContainsTaggedFields(t, "zfs", intMetrics, tags)
-
-	err = os.RemoveAll(os.TempDir() + "/telegraf")
-	require.NoError(t, err)
-}
-
-func TestZfsPoolUnavailMetrics(t *testing.T) {
-	err := os.MkdirAll(testKstatPath, 0755)
-	require.NoError(t, err)
-
-	err = os.MkdirAll(testKstatPath+"/HOME", 0755)
-	require.NoError(t, err)
-
-	err = ioutil.WriteFile(testKstatPath+"/HOME/io", []byte(pool_ioContents), 0644)
-	require.NoError(t, err)
-
-	err = ioutil.WriteFile(testKstatPath+"/arcstats", []byte(arcstatsContents), 0644)
-	require.NoError(t, err)
-
-	poolMetrics := getPoolUnavailMetrics()
-
-	var acc testutil.Accumulator
-
-	z := &Zfs{KstatPath: testKstatPath, KstatMetrics: []string{"arcstats"}, zpool: mock_zpool_unavail}
-	err = z.Gather(&acc)
-	require.NoError(t, err)
-
-	require.False(t, acc.HasMeasurement("zfs_pool"))
-	acc.Metrics = nil
-
-	z = &Zfs{KstatPath: testKstatPath, KstatMetrics: []string{"arcstats"}, PoolMetrics: true, zpool: mock_zpool_unavail}
-	err = z.Gather(&acc)
-	require.NoError(t, err)
-
-	//one pool, all metrics
-	tags := map[string]string{
-		"pool":   "HOME",
-		"health": "UNAVAIL",
-	}
-	acc.AssertContainsTaggedFields(t, "zfs_pool", poolMetrics, tags)
-
-	err = os.RemoveAll(os.TempDir() + "/telegraf")
-	require.NoError(t, err)
-}
+//zpool iostat -Hp -l -q -y 1
+const zpoolIostatContents = `
+HOME	203525095936	116449967616	0	238	0	1612537	-	143137	-	69820	-	3456	-	82830	-	0	0	0	0	0	0	0	0	0	0
+STORAGE	1041502023680	14901416579072	0	1491	0	164485664	-	77190832	-	5273927	-	4608	-	72408643	-	0	0	0	0	0	0	184	4	0	0
+HOME	203525095936	116449967616	0	0	0	0	-	-	-	-	-	-	-	-	-	0	0	0	0	0	0	0	0	0	0
+STORAGE	1041502023680	14901416579072	0	1510	0	165553394	-	74766449	-	5269671	-	3328	-	69849836	-	0	0	0	0	0	0	248	6	0	0
+HOME	203525095936	116449967616	0	0	0	0	-	-	-	-	-	-	-	-	-	0	0	0	0	0	0	0	0	0	0
+STORAGE	1041502023680	14901416579072	0	1476	0	167216354	-	61012954	-	5416006	-	3840	-	56158448	-	0	0	0	0	0	0	271	8	0	0
+HOME	203525095936	116449967616	0	0	0	0	-	-	-	-	-	-	-	-	-	0	0	0	0	0	0	0	0	0	0
+STORAGE	1041502023680	14901416579072	0	1471	0	163783365	-	80763358	-	5747755	-	4224	-	75404145	-	0	0	0	0	0	0	291	8	0	0
+HOME	203525095936	116449967616	0	0	0	0	-	-	-	-	-	-	-	-	-	0	0	0	0	0	0	0	0	0	0
+STORAGE	1041502023680	14901416579072	0	1184	0	133041318	-	76985756	-	6452099	-	3072	-	70534877	-	0	0	0	0	0	0	211	6	0	0
+HOME	203523718144	116451345408	0	273	0	1699656	-	169797	-	68276	-	3072	-	103372	-	0	0	0	0	0	0	0	0	0	0
+STORAGE	1041502023680	14901416579072	0	1275	0	141177045	-	76358227	-	6738397	-	4608	-	70201298	-	0	0	0	0	0	0	226	8	0	0
+HOME	203523718144	116451345408	0	0	0	0	-	-	-	-	-	-	-	-	-	0	0	0	0	0	0	0	0	0	0
+STORAGE	1041502023680	14901416579072	0	7966	0	1001163487	-	117373966	-	1161228	-	6144	-	116303952	-	0	0	0	0	0	0	4559	12	0	0
+HOME	203523718144	116451345408	0	0	0	0	-	-	-	-	-	-	-	-	-	0	0	0	0	0	0	0	0	0	0
+STORAGE	1041502023680	14901416579072	0	8009	0	1014721417	-	251578050	-	1199958	-	3072	-	250375641	-	0	0	0	0	0	0	281	8	0	0
+HOME	203523718144	116451345408	0	0	0	0	-	-	-	-	-	-	-	-	-	0	0	0	0	0	0	0	0	0	0
+STORAGE	1042354585600	14900564017152	0	1338	0	113423258	-	67588940	-	4967609	-	3225	-	64129430	-	0	0	0	0	0	0	0	1	0	0
+HOME	203523718144	116451345408	0	0	0	0	-	-	-	-	-	-	-	-	-	0	0	0	0	0	0	0	0	0	0
+STORAGE	1042353745920	14900564856832	0	1374	0	133165167	-	62578016	-	5457761	-	2730	-	57825773	-	0	0	0	0	0	0	229	8	0	0
+`
 
 func getKstatMetricsArcOnly() map[string]interface{} {
 	return map[string]interface{}{
@@ -586,7 +441,35 @@ func getKstatMetricsAll() map[string]interface{} {
 	return arcMetrics
 }
 
-func getPoolMetrics() map[string]interface{} {
+
+//"HOME	ONLINE	319975063552	202555169792	117419893760	22	63	1.00	0	0",
+func getZpoolListMetrics() map[string]interface{} {
+	return map[string]interface{}{
+		"allocated":     int64(202555169792),
+		"capacity":      int64(63),
+		"dedupratio":    float64(1.0),
+		"fragmentation": int64(22),
+		"free":          int64(117419893760),
+		"size":          int64(319975063552),
+		"freeing":       int64(0),
+		"leaked":        int64(0),
+	}
+}
+
+//"STORAGE	ONLINE	15942918602752	1172931735552	14769986867200	12	7	1.00	0	0",
+func getZpoolListMetrics2() map[string]interface{} {
+	return map[string]interface{}{
+		"allocated":     int64(1172931735552),
+		"capacity":      int64(7),
+		"dedupratio":    float64(1.0),
+		"fragmentation": int64(12),
+		"free":          int64(14769986867200),
+		"size":          int64(15942918602752),
+		"freeing":       int64(0),
+		"leaked":        int64(0),
+	}
+}
+func getPoolIoMetrics() map[string]interface{} {
 	return map[string]interface{}{
 		"nread":         int64(1884160),
 		"nwritten":      int64(6450688),
@@ -600,14 +483,6 @@ func getPoolMetrics() map[string]interface{} {
 		"rupdate":       int64(2263669871823),
 		"wcnt":          int64(0),
 		"rcnt":          int64(0),
-		"allocated":     int64(202555169792),
-		"capacity":      int64(63),
-		"dedupratio":    float64(1.0),
-		"fragmentation": int64(22),
-		"free":          int64(117419893760),
-		"size":          int64(319975063552),
-		"freeing":       int64(0),
-		"leaked":        int64(0),
 	}
 }
 
@@ -628,31 +503,77 @@ func getPoolUnavailMetrics() map[string]interface{} {
 		"size":     int64(0),
 	}
 }
+func getPoolIostatMetrics2() map[string]interface{} {
+	return map[string]interface{}{
+		"iostat_alloc":         int64(1042353745920),
+		"iostat_free":      int64(14900564856832),
+		"operations_read":         int64(0),
+		"operations_write":        int64(27094),
+		"bandwidth_read":         int64(0),
+		"bandwidth_write":      int64(3197730469),
+		"total_wait_read":       int64(0),
+		"total_wait_write":         int64(946196548),
+		"disk_wait_read":      int64(0),
+		"disk_wait_write":       int64(47684411),
+		"syncq_wait_read":          int64(0),
+		"syncq_wait_write":          int64(38851),
+		"asyncq_wait_read":     int64(0),
+		"asyncq_wait_write":      int64(903192043),
+		"scrub_wait":    int64(0),
+		"syncq_read_operations_pend": int64(0),
+		"syncq_read_operations_activ":          int64(0),
+		"syncq_write_operations_pend":          int64(0),
+		"syncq_write_operations_activ":       int64(0),
+		"asyncq_read_operations_pend":        int64(0),
+		"asyncq_read_operations_activ":        int64(0),
+		"asyncq_write_operations_pend":        int64(6500),
+		"asyncq_write_operations_activ":        int64(69),
+		"scrubq_read_pend":        int64(0),
+		"scrubq_read_activ":        int64(0),
+	}
+}
 
-//zpool iostat -Hp -l -q -y 1
-const zpoolIostatContents = `
-rpool	203525095936	116449967616	0	238	0	1612537	-	143137	-	69820	-	3456	-	82830	-	0	0	0	0	0	0	0	0	0	0
-zd01	1041502023680	14901416579072	0	1491	0	164485664	-	77190832	-	5273927	-	4608	-	72408643	-	0	0	0	0	0	0	184	4	0	0
-rpool	203525095936	116449967616	0	0	0	0	-	-	-	-	-	-	-	-	-	0	0	0	0	0	0	0	0	0	0
-zd01	1041502023680	14901416579072	0	1510	0	165553394	-	74766449	-	5269671	-	3328	-	69849836	-	0	0	0	0	0	0	248	6	0	0
-rpool	203525095936	116449967616	0	0	0	0	-	-	-	-	-	-	-	-	-	0	0	0	0	0	0	0	0	0	0
-zd01	1041502023680	14901416579072	0	1476	0	167216354	-	61012954	-	5416006	-	3840	-	56158448	-	0	0	0	0	0	0	271	8	0	0
-rpool	203525095936	116449967616	0	0	0	0	-	-	-	-	-	-	-	-	-	0	0	0	0	0	0	0	0	0	0
-zd01	1041502023680	14901416579072	0	1471	0	163783365	-	80763358	-	5747755	-	4224	-	75404145	-	0	0	0	0	0	0	291	8	0	0
-rpool	203525095936	116449967616	0	0	0	0	-	-	-	-	-	-	-	-	-	0	0	0	0	0	0	0	0	0	0
-zd01	1041502023680	14901416579072	0	1184	0	133041318	-	76985756	-	6452099	-	3072	-	70534877	-	0	0	0	0	0	0	211	6	0	0
-rpool	203523718144	116451345408	0	273	0	1699656	-	169797	-	68276	-	3072	-	103372	-	0	0	0	0	0	0	0	0	0	0
-zd01	1041502023680	14901416579072	0	1275	0	141177045	-	76358227	-	6738397	-	4608	-	70201298	-	0	0	0	0	0	0	226	8	0	0
-rpool	203523718144	116451345408	0	0	0	0	-	-	-	-	-	-	-	-	-	0	0	0	0	0	0	0	0	0	0
-zd01	1041502023680	14901416579072	0	7966	0	1001163487	-	117373966	-	1161228	-	6144	-	116303952	-	0	0	0	0	0	0	4559	12	0	0
-rpool	203523718144	116451345408	0	0	0	0	-	-	-	-	-	-	-	-	-	0	0	0	0	0	0	0	0	0	0
-zd01	1041502023680	14901416579072	0	8009	0	1014721417	-	251578050	-	1199958	-	3072	-	250375641	-	0	0	0	0	0	0	281	8	0	0
-rpool	203523718144	116451345408	0	0	0	0	-	-	-	-	-	-	-	-	-	0	0	0	0	0	0	0	0	0	0
-zd01	1042354585600	14900564017152	0	1338	0	113423258	-	67588940	-	4967609	-	3225	-	64129430	-	0	0	0	0	0	0	0	1	0	0
-rpool	203523718144	116451345408	0	0	0	0	-	-	-	-	-	-	-	-	-	0	0	0	0	0	0	0	0	0	0
-zd01	1042353745920	14900564856832	0	1374	0	133165167	-	62578016	-	5457761	-	2730	-	57825773	-	0	0	0	0	0	0	229	8	0	0
-`
+func getPoolIostatMetrics() map[string]interface{} {
+	return map[string]interface{}{
+		"iostat_alloc":         int64(203523718144),
+		"iostat_free":      int64(116451345408),
+		"operations_read":         int64(0),
+		"operations_write":        int64(511),
+		"bandwidth_read":         int64(0),
+		"bandwidth_write":      int64(3312193),
+		"total_wait_read":       int64(0),
+		"total_wait_write":         int64(312934),
+		"disk_wait_read":      int64(0),
+		"disk_wait_write":       int64(138096),
+		"syncq_wait_read":          int64(0),
+		"syncq_wait_write":          int64(6528),
+		"asyncq_wait_read":     int64(0),
+		"asyncq_wait_write":      int64(186202),
+		"scrub_wait":    int64(0),
+		"syncq_read_operations_pend": int64(0),
+		"syncq_read_operations_activ":          int64(0),
+		"syncq_write_operations_pend":          int64(0),
+		"syncq_write_operations_activ":       int64(0),
+		"asyncq_read_operations_pend":        int64(0),
+		"asyncq_read_operations_activ":        int64(0),
+		"asyncq_write_operations_pend":        int64(0),
+		"asyncq_write_operations_activ":        int64(0),
+		"scrubq_read_pend":        int64(0),
+		"scrubq_read_activ":        int64(0),
+	}
+}
+func getPoolMetrics() map[string]interface{} {
+	return mergeMetrics(getPoolIoMetrics(), getZpoolListMetrics())
+}
+func mergeMetrics(m1, m2 map[string]interface{}) map[string]interface{} {
+	for k, v := range m1 {
+		m2[k] = v
+	}
+	return m2
+}
 
+
+//mock functions
 func mock_zpool_iostat(out chan string, outErr chan error) {
 	lines := strings.Split(zpoolIostatContents, "\n")
 	for _, line := range lines {
@@ -661,20 +582,183 @@ func mock_zpool_iostat(out chan string, outErr chan error) {
 	return
 }
 
+func mock_zpool_one_pool() ([]string, error) {
+	return zpool_output[0:1], nil
+}
+
+func mock_zpool() ([]string, error) {
+	return zpool_output, nil
+}
+
+func mock_zpool_unavail() ([]string, error) {
+	return zpool_output_unavail, nil
+}
+
+
+//file helpers
+var testKstatPath = os.TempDir() + "/telegraf/proc/spl/kstat/zfs"
+func utilCreateTempKstatFiles(t *testing.T, path string, poolIoContents map[string]string) {
+	err := os.MkdirAll(path, 0755)
+	require.NoError(t, err)
+
+	err = ioutil.WriteFile(path+"/arcstats", []byte(arcstatsContents), 0644)
+	require.NoError(t, err)
+
+	err = ioutil.WriteFile(path+"/zfetchstats", []byte(zfetchstatsContents), 0644)
+	require.NoError(t, err)
+
+	err = ioutil.WriteFile(path+"/zil", []byte(zilContents), 0644)
+	require.NoError(t, err)
+
+	err = ioutil.WriteFile(path+"/fm", []byte(fmContents), 0644)
+	require.NoError(t, err)
+
+	err = ioutil.WriteFile(path+"/dmu_tx", []byte(dmu_txContents), 0644)
+	require.NoError(t, err)
+
+	err = ioutil.WriteFile(path+"/abdstats", []byte(abdstatsContents), 0644)
+	require.NoError(t, err)
+
+	for poolName, ioContent := range poolIoContents {
+		err = os.MkdirAll(path+"/" + poolName, 0755)
+		require.NoError(t, err)
+
+		err = ioutil.WriteFile(path+"/"+poolName+"/io", []byte(ioContent), 0644)
+		require.NoError(t, err)
+	}
+
+}
+func utilDestroyTempKstatFiles(t *testing.T, path string) {
+	err := os.RemoveAll(path)
+	require.NoError(t, err)
+}
+
+
+//Tests below
+func TestZfsPoolMetrics(t *testing.T) {
+	ioContent := map[string]string{
+		"HOME": pool_ioContents,
+	}
+	utilCreateTempKstatFiles(t, testKstatPath, ioContent)
+	defer utilDestroyTempKstatFiles(t, testKstatPath)
+
+	poolMetrics := getPoolMetrics()
+
+	var acc testutil.Accumulator
+
+	z := &Zfs{KstatPath: testKstatPath, KstatMetrics: []string{"arcstats"}, zpool: mock_zpool_one_pool}
+	err := z.Gather(&acc)
+	require.NoError(t, err)
+
+	require.False(t, acc.HasMeasurement("zfs_pool"))
+	acc.Metrics = nil
+
+	z = &Zfs{KstatPath: testKstatPath, KstatMetrics: []string{"arcstats"}, PoolMetrics: true, zpool: mock_zpool_one_pool}
+	err = z.Gather(&acc)
+	require.NoError(t, err)
+
+	//one pool, all metrics
+	tags := map[string]string{
+		"pool":   "HOME",
+		"health": "ONLINE",
+	}
+
+	acc.AssertContainsTaggedFields(t, "zfs_pool", poolMetrics, tags)
+}
+
+func TestZfsGeneratesMetrics(t *testing.T) {
+	ioContent := map[string]string{
+		"HOME": "",
+	}
+	utilCreateTempKstatFiles(t, testKstatPath, ioContent)
+	defer utilDestroyTempKstatFiles(t, testKstatPath)
+
+	intMetrics := getKstatMetricsAll()
+
+	var acc testutil.Accumulator
+
+	//one pool, all metrics
+	tags := map[string]string{
+		"pools": "HOME",
+	}
+
+	z := &Zfs{KstatPath: testKstatPath, zpool: mock_zpool_one_pool}
+	err := z.Gather(&acc)
+	require.NoError(t, err)
+
+	acc.AssertContainsTaggedFields(t, "zfs", intMetrics, tags)
+}
+
+func TestZfsGeneratesMetricsTwoPools(t *testing.T) {
+	ioContent := map[string]string{
+		"HOME": "",
+		"STORAGE": "",
+	}
+	utilCreateTempKstatFiles(t, testKstatPath, ioContent)
+	defer utilDestroyTempKstatFiles(t, testKstatPath)
+
+	//two pools, all metrics
+	tags := map[string]string{
+		"pools": "HOME::STORAGE",
+	}
+
+	z := &Zfs{KstatPath: testKstatPath, zpool: mock_zpool}
+	acc := testutil.Accumulator{}
+	err := z.Gather(&acc)
+	require.NoError(t, err)
+
+	intMetrics := getKstatMetricsAll()
+	acc.AssertContainsTaggedFields(t, "zfs", intMetrics, tags)
+	acc.Metrics = nil
+
+	intMetrics = getKstatMetricsArcOnly()
+
+	//two pools, one metric
+	z = &Zfs{KstatPath: testKstatPath, KstatMetrics: []string{"arcstats"}, zpool: mock_zpool}
+	acc2 := testutil.Accumulator{}
+	err = z.Gather(&acc2)
+	require.NoError(t, err)
+
+	acc2.AssertContainsTaggedFields(t, "zfs", intMetrics, tags)
+}
+
+func TestZfsPoolUnavailMetrics(t *testing.T) {
+	ioContent := map[string]string{
+		"HOME": pool_ioContents,
+	}
+	utilCreateTempKstatFiles(t, testKstatPath, ioContent)
+	defer utilDestroyTempKstatFiles(t, testKstatPath)
+
+	poolMetrics := getPoolUnavailMetrics()
+
+	var acc testutil.Accumulator
+
+	z := &Zfs{KstatPath: testKstatPath, KstatMetrics: []string{"arcstats"}, zpool: mock_zpool_unavail}
+	err := z.Gather(&acc)
+	require.NoError(t, err)
+
+	require.False(t, acc.HasMeasurement("zfs_pool"))
+	acc.Metrics = nil
+
+	z = &Zfs{KstatPath: testKstatPath, KstatMetrics: []string{"arcstats"}, PoolMetrics: true, zpool: mock_zpool_unavail}
+	err = z.Gather(&acc)
+	require.NoError(t, err)
+
+	//one pool, all metrics
+	tags := map[string]string{
+		"pool":   "HOME",
+		"health": "UNAVAIL",
+	}
+	acc.AssertContainsTaggedFields(t, "zfs_pool", poolMetrics, tags)
+}
+
 func TestZfsPoolIostatMetrics(t *testing.T) {
-	//err := os.MkdirAll(testKstatPath, 0755)
-	//require.NoError(t, err)
-
-	//err = os.MkdirAll(testKstatPath+"/HOME", 0755)
-	//require.NoError(t, err)
-
-	//err = ioutil.WriteFile(testKstatPath+"/HOME/io", []byte(pool_ioContents), 0644)
-	//require.NoError(t, err)
-
-	//err = ioutil.WriteFile(testKstatPath+"/arcstats", []byte(arcstatsContents), 0644)
-	//require.NoError(t, err)
-
-	//poolMetrics := getPoolMetrics()
+	ioContent := map[string]string{
+		"HOME": "",
+		"STORAGE": "",
+	}
+	utilCreateTempKstatFiles(t, testKstatPath, ioContent)
+	defer utilDestroyTempKstatFiles(t, testKstatPath)
 
 	var acc testutil.Accumulator
 
@@ -687,23 +771,30 @@ func TestZfsPoolIostatMetrics(t *testing.T) {
 		zpoolIostat: mock_zpool_iostat,
 
 	}
+
 	err := z.Start(&acc)
 	require.NoError(t, err)
 	defer z.Stop()
 
+
 	err = z.Gather(&acc)
 	require.NoError(t, err)
 
-	//one pool, all metrics
-//	tags := map[string]string{
-//		"pool":   "HOME",
-//		"health": "ONLINE",
-//	}
+	poolMetrics := mergeMetrics(getZpoolListMetrics(), getPoolIostatMetrics())
 
-	//acc.AssertContainsTaggedFields(t, "zfs_pool", poolMetrics, tags)
+	tags := map[string]string{
+		"health": "ONLINE",
+		"pool":   "HOME",
+	}
+	acc.AssertContainsTaggedFields(t, "zfs_pool", poolMetrics, tags)
 
-	//err = os.RemoveAll(os.TempDir() + "/telegraf")
-	//require.NoError(t, err)
+	poolMetrics2 := mergeMetrics(getZpoolListMetrics2(), getPoolIostatMetrics2())
+
+	tags2 := map[string]string{
+		"health": "ONLINE",
+		"pool":   "STORAGE",
+	}
+	acc.AssertContainsTaggedFields(t, "zfs_pool", poolMetrics2, tags2)
 }
 
 

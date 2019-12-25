@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/internal"
@@ -301,19 +302,14 @@ func sumIostatsLines(exist map[string]interface{}, added map[string]interface{})
 	return exist
 }
 
-func (z *Zfs) getZpoolIostats() (map[string]map[string]interface{}, error) {
+func (z *Zfs) getZpoolIostats(numberOfPools int) (map[string]map[string]interface{}, error) {
 
-	fmt.Printf("Zpool Iostat\n")
 	poolFields := map[string]map[string]interface{}{}
 
 	if z.zpoolIostatSource == nil {
 		return poolFields, nil
 	}
 
-	//TODO
-	// - buffered or unbuffered
-	// - how to read from channel without blocking
-	// - group multiple lines by pool
 	moreLines := true
 	linesCount := 0
 	for moreLines {
@@ -340,8 +336,13 @@ func (z *Zfs) getZpoolIostats() (map[string]map[string]interface{}, error) {
 				}
 			}
 		default:
-			fmt.Printf("No IO stat \n")
-			moreLines = false
+			// We need to pool from zpool iostat at least one line for every zfs pool
+			// if for varyous reasons we pooled less than that we should continue pooling
+			if linesCount < numberOfPools {
+				time.Sleep(time.Millisecond * 100)
+			} else {
+				moreLines = false
+			}
 		}
 
 	}
@@ -368,14 +369,16 @@ func (z *Zfs) Gather(acc telegraf.Accumulator) error {
 		return err
 	}
 
-	poolIostatsFields, err := z.getZpoolIostats()
+	poolNames := []string{}
+	pools := getPools(z.getKstatPath())
+	//fmt.Printf("Pools:%v\n", pools)
+
+	poolIostatsFields, err := z.getZpoolIostats(len(pools))
 	if err != nil {
 		return err
 	}
 	//fmt.Printf("PoolIostatFields: %#v\n", poolIostatsFields)
 
-	poolNames := []string{}
-	pools := getPools(z.getKstatPath())
 	for _, pool := range pools {
 		poolNames = append(poolNames, pool.name)
 
@@ -389,8 +392,6 @@ func (z *Zfs) Gather(acc telegraf.Accumulator) error {
 				for k, v := range poolFields[pool.name] {
 					fields[k] = v
 				}
-				//fmt.Printf("Pool: %#v\n", pool)
-				//fmt.Printf("Fields: %#v\n", fields)
 				if _, ok := poolIostatsFields[pool.name]; ok {
 					for k, v := range poolIostatsFields[pool.name] {
 						fields[k] = v
@@ -404,6 +405,8 @@ func (z *Zfs) Gather(acc telegraf.Accumulator) error {
 				delete(fields, "name")
 				delete(fields, "health")
 
+				//fmt.Printf("Fields: %v\n", fields)
+				//fmt.Printf("Tags: %v\n", tags)
 				acc.AddFields("zfs_pool", fields, tags)
 			}
 		}
@@ -448,7 +451,7 @@ func (z *Zfs) Start(acc telegraf.Accumulator) error {
 	if z.PoolIostatMetrics {
 		z.zpoolIostatError = make(chan error, 1)
 		z.zpoolIostatSource = make(chan string, ZpoolIostatBufferSize)
-		go zpoolIostat(z.zpoolIostatSource, z.zpoolIostatError)
+		go z.zpoolIostat(z.zpoolIostatSource, z.zpoolIostatError)
 	}
 	return nil
 }
