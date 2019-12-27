@@ -2,6 +2,7 @@ package zfs
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os/exec"
 	"strconv"
@@ -10,18 +11,19 @@ import (
 
 type Sysctl func(metric string) ([]string, error)
 type Zpool func() ([]string, error)
-type ZpoolIostat func(out chan string, outErr chan error)
+type ZpoolIostat func(ctx context.Context, out chan string, outErr chan error)
 
 type Zfs struct {
-	KstatPath         string
-	KstatMetrics      []string
-	PoolMetrics       bool
-	PoolIostatMetrics bool
-	sysctl            Sysctl
-	zpool             Zpool
-	zpoolIostat       ZpoolIostat
-	zpoolIostatSource chan string
-	zpoolIostatError  chan error
+	KstatPath             string
+	KstatMetrics          []string
+	PoolMetrics           bool
+	PoolIostatMetrics     bool
+	sysctl                Sysctl
+	zpool                 Zpool
+	zpoolIostat           ZpoolIostat
+	zpoolIostatSource     chan string
+	zpoolIostatError      chan error
+	zpoolIostatCancelFunc context.CancelFunc
 }
 
 var sampleConfig = `

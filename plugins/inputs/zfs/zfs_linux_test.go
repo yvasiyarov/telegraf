@@ -3,9 +3,10 @@
 package zfs
 
 import (
+	"context"
 	"io/ioutil"
-	"strings"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/influxdata/telegraf/testutil"
@@ -244,17 +245,16 @@ preferred_found                 4    0
 preferred_not_found             4    43
 `
 
-
 // $ zpool list -Hp -o name,health,size,alloc,free,fragmentation,capacity,dedupratio,freeing,leaked
 var zpool_output = []string{
 	"HOME	ONLINE	319975063552	202555169792	117419893760	22	63	1.00	0	0",
 	"STORAGE	ONLINE	15942918602752	1172931735552	14769986867200	12	7	1.00	0	0",
 }
+
 // $ zpool list -Hp -o name,health,size,alloc,free,fragmentation,capacity,dedupratio
 var zpool_output_unavail = []string{
 	"HOME	UNAVAIL	-	-	-	-	-	-	-	-",
 }
-
 
 //zpool iostat -Hp -l -q -y 1
 const zpoolIostatContents = `
@@ -441,7 +441,6 @@ func getKstatMetricsAll() map[string]interface{} {
 	return arcMetrics
 }
 
-
 //"HOME	ONLINE	319975063552	202555169792	117419893760	22	63	1.00	0	0",
 func getZpoolListMetrics() map[string]interface{} {
 	return map[string]interface{}{
@@ -471,18 +470,18 @@ func getZpoolListMetrics2() map[string]interface{} {
 }
 func getPoolIoMetrics() map[string]interface{} {
 	return map[string]interface{}{
-		"nread":         int64(1884160),
-		"nwritten":      int64(6450688),
-		"reads":         int64(22),
-		"writes":        int64(978),
-		"wtime":         int64(272187126),
-		"wlentime":      int64(2850519036),
-		"wupdate":       int64(2263669418655),
-		"rtime":         int64(424226814),
-		"rlentime":      int64(2850519036),
-		"rupdate":       int64(2263669871823),
-		"wcnt":          int64(0),
-		"rcnt":          int64(0),
+		"nread":    int64(1884160),
+		"nwritten": int64(6450688),
+		"reads":    int64(22),
+		"writes":   int64(978),
+		"wtime":    int64(272187126),
+		"wlentime": int64(2850519036),
+		"wupdate":  int64(2263669418655),
+		"rtime":    int64(424226814),
+		"rlentime": int64(2850519036),
+		"rupdate":  int64(2263669871823),
+		"wcnt":     int64(0),
+		"rcnt":     int64(0),
 	}
 }
 
@@ -505,61 +504,61 @@ func getPoolUnavailMetrics() map[string]interface{} {
 }
 func getPoolIostatMetrics2() map[string]interface{} {
 	return map[string]interface{}{
-		"iostat_alloc":         int64(1042353745920),
-		"iostat_free":      int64(14900564856832),
-		"operations_read":         int64(0),
-		"operations_write":        int64(27094),
-		"bandwidth_read":         int64(0),
-		"bandwidth_write":      int64(3197730469),
-		"total_wait_read":       int64(0),
-		"total_wait_write":         int64(946196548),
-		"disk_wait_read":      int64(0),
-		"disk_wait_write":       int64(47684411),
-		"syncq_wait_read":          int64(0),
-		"syncq_wait_write":          int64(38851),
-		"asyncq_wait_read":     int64(0),
-		"asyncq_wait_write":      int64(903192043),
-		"scrub_wait":    int64(0),
-		"syncq_read_operations_pend": int64(0),
-		"syncq_read_operations_activ":          int64(0),
-		"syncq_write_operations_pend":          int64(0),
-		"syncq_write_operations_activ":       int64(0),
-		"asyncq_read_operations_pend":        int64(0),
-		"asyncq_read_operations_activ":        int64(0),
-		"asyncq_write_operations_pend":        int64(6500),
-		"asyncq_write_operations_activ":        int64(69),
-		"scrubq_read_pend":        int64(0),
-		"scrubq_read_activ":        int64(0),
+		"iostat_alloc":                  int64(1042353745920),
+		"iostat_free":                   int64(14900564856832),
+		"operations_read":               int64(0),
+		"operations_write":              int64(27094),
+		"bandwidth_read":                int64(0),
+		"bandwidth_write":               int64(3197730469),
+		"total_wait_read":               int64(0),
+		"total_wait_write":              int64(946196548),
+		"disk_wait_read":                int64(0),
+		"disk_wait_write":               int64(47684411),
+		"syncq_wait_read":               int64(0),
+		"syncq_wait_write":              int64(38851),
+		"asyncq_wait_read":              int64(0),
+		"asyncq_wait_write":             int64(903192043),
+		"scrub_wait":                    int64(0),
+		"syncq_read_operations_pend":    int64(0),
+		"syncq_read_operations_activ":   int64(0),
+		"syncq_write_operations_pend":   int64(0),
+		"syncq_write_operations_activ":  int64(0),
+		"asyncq_read_operations_pend":   int64(0),
+		"asyncq_read_operations_activ":  int64(0),
+		"asyncq_write_operations_pend":  int64(6500),
+		"asyncq_write_operations_activ": int64(69),
+		"scrubq_read_pend":              int64(0),
+		"scrubq_read_activ":             int64(0),
 	}
 }
 
 func getPoolIostatMetrics() map[string]interface{} {
 	return map[string]interface{}{
-		"iostat_alloc":         int64(203523718144),
-		"iostat_free":      int64(116451345408),
-		"operations_read":         int64(0),
-		"operations_write":        int64(511),
-		"bandwidth_read":         int64(0),
-		"bandwidth_write":      int64(3312193),
-		"total_wait_read":       int64(0),
-		"total_wait_write":         int64(312934),
-		"disk_wait_read":      int64(0),
-		"disk_wait_write":       int64(138096),
-		"syncq_wait_read":          int64(0),
-		"syncq_wait_write":          int64(6528),
-		"asyncq_wait_read":     int64(0),
-		"asyncq_wait_write":      int64(186202),
-		"scrub_wait":    int64(0),
-		"syncq_read_operations_pend": int64(0),
-		"syncq_read_operations_activ":          int64(0),
-		"syncq_write_operations_pend":          int64(0),
-		"syncq_write_operations_activ":       int64(0),
-		"asyncq_read_operations_pend":        int64(0),
-		"asyncq_read_operations_activ":        int64(0),
-		"asyncq_write_operations_pend":        int64(0),
-		"asyncq_write_operations_activ":        int64(0),
-		"scrubq_read_pend":        int64(0),
-		"scrubq_read_activ":        int64(0),
+		"iostat_alloc":                  int64(203523718144),
+		"iostat_free":                   int64(116451345408),
+		"operations_read":               int64(0),
+		"operations_write":              int64(511),
+		"bandwidth_read":                int64(0),
+		"bandwidth_write":               int64(3312193),
+		"total_wait_read":               int64(0),
+		"total_wait_write":              int64(312934),
+		"disk_wait_read":                int64(0),
+		"disk_wait_write":               int64(138096),
+		"syncq_wait_read":               int64(0),
+		"syncq_wait_write":              int64(6528),
+		"asyncq_wait_read":              int64(0),
+		"asyncq_wait_write":             int64(186202),
+		"scrub_wait":                    int64(0),
+		"syncq_read_operations_pend":    int64(0),
+		"syncq_read_operations_activ":   int64(0),
+		"syncq_write_operations_pend":   int64(0),
+		"syncq_write_operations_activ":  int64(0),
+		"asyncq_read_operations_pend":   int64(0),
+		"asyncq_read_operations_activ":  int64(0),
+		"asyncq_write_operations_pend":  int64(0),
+		"asyncq_write_operations_activ": int64(0),
+		"scrubq_read_pend":              int64(0),
+		"scrubq_read_activ":             int64(0),
 	}
 }
 func getPoolMetrics() map[string]interface{} {
@@ -572,9 +571,8 @@ func mergeMetrics(m1, m2 map[string]interface{}) map[string]interface{} {
 	return m2
 }
 
-
 //mock functions
-func mock_zpool_iostat(out chan string, outErr chan error) {
+func mock_zpool_iostat(ctx context.Context, out chan string, outErr chan error) {
 	lines := strings.Split(zpoolIostatContents, "\n")
 	for _, line := range lines {
 		out <- line
@@ -594,9 +592,9 @@ func mock_zpool_unavail() ([]string, error) {
 	return zpool_output_unavail, nil
 }
 
-
 //file helpers
 var testKstatPath = os.TempDir() + "/telegraf/proc/spl/kstat/zfs"
+
 func utilCreateTempKstatFiles(t *testing.T, path string, poolIoContents map[string]string) {
 	err := os.MkdirAll(path, 0755)
 	require.NoError(t, err)
@@ -620,7 +618,7 @@ func utilCreateTempKstatFiles(t *testing.T, path string, poolIoContents map[stri
 	require.NoError(t, err)
 
 	for poolName, ioContent := range poolIoContents {
-		err = os.MkdirAll(path+"/" + poolName, 0755)
+		err = os.MkdirAll(path+"/"+poolName, 0755)
 		require.NoError(t, err)
 
 		err = ioutil.WriteFile(path+"/"+poolName+"/io", []byte(ioContent), 0644)
@@ -632,7 +630,6 @@ func utilDestroyTempKstatFiles(t *testing.T, path string) {
 	err := os.RemoveAll(path)
 	require.NoError(t, err)
 }
-
 
 //Tests below
 func TestZfsPoolMetrics(t *testing.T) {
@@ -691,7 +688,7 @@ func TestZfsGeneratesMetrics(t *testing.T) {
 
 func TestZfsGeneratesMetricsTwoPools(t *testing.T) {
 	ioContent := map[string]string{
-		"HOME": "",
+		"HOME":    "",
 		"STORAGE": "",
 	}
 	utilCreateTempKstatFiles(t, testKstatPath, ioContent)
@@ -754,7 +751,7 @@ func TestZfsPoolUnavailMetrics(t *testing.T) {
 
 func TestZfsPoolIostatMetrics(t *testing.T) {
 	ioContent := map[string]string{
-		"HOME": "",
+		"HOME":    "",
 		"STORAGE": "",
 	}
 	utilCreateTempKstatFiles(t, testKstatPath, ioContent)
@@ -763,19 +760,17 @@ func TestZfsPoolIostatMetrics(t *testing.T) {
 	var acc testutil.Accumulator
 
 	z := &Zfs{
-		KstatPath: testKstatPath, 
-		KstatMetrics: []string{}, 
-		PoolMetrics: true,
+		KstatPath:         testKstatPath,
+		KstatMetrics:      []string{},
+		PoolMetrics:       true,
 		PoolIostatMetrics: true,
-		zpool: mock_zpool,
-		zpoolIostat: mock_zpool_iostat,
-
+		zpool:             mock_zpool,
+		zpoolIostat:       mock_zpool_iostat,
 	}
 
 	err := z.Start(&acc)
 	require.NoError(t, err)
 	defer z.Stop()
-
 
 	err = z.Gather(&acc)
 	require.NoError(t, err)
@@ -796,5 +791,3 @@ func TestZfsPoolIostatMetrics(t *testing.T) {
 	}
 	acc.AssertContainsTaggedFields(t, "zfs_pool", poolMetrics2, tags2)
 }
-
-

@@ -3,17 +3,23 @@
 package zfs
 
 import (
+	"bufio"
+	"context"
 	"fmt"
+	"io"
+	"log"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/internal"
 	"github.com/influxdata/telegraf/plugins/inputs"
 )
-
 
 const ZpoolIostatBufferSize = 1000
 
@@ -270,7 +276,7 @@ func parseZpoolIostatLine(line string) (map[string]interface{}, error) {
 		return fields, fmt.Errorf("Error parsing asyncq_write_operations->activ: %s", err)
 	}
 	fields["asyncq_write_operations_activ"] = asyncqWriteOperationsActiv
-	
+
 	scrubqReadPend, err := strconv.ParseInt(col[24], 10, 64)
 	if err != nil {
 		return fields, fmt.Errorf("Error parsing scrubq_read->pend: %s", err)
@@ -289,9 +295,9 @@ func parseZpoolIostatLine(line string) (map[string]interface{}, error) {
 func sumIostatsLines(exist map[string]interface{}, added map[string]interface{}) map[string]interface{} {
 	exist["iostat_alloc"] = added["iostat_alloc"]
 	exist["iostat_free"] = added["iostat_free"]
-	
-	fieldsToSum :=[]string{"operations_read", "operations_write", "bandwidth_read", "bandwidth_write", "total_wait_read", "total_wait_write", 
-		"disk_wait_read", "disk_wait_write", "syncq_wait_read", "syncq_wait_write", "asyncq_wait_read", "asyncq_wait_write", "scrub_wait", 
+
+	fieldsToSum := []string{"operations_read", "operations_write", "bandwidth_read", "bandwidth_write", "total_wait_read", "total_wait_write",
+		"disk_wait_read", "disk_wait_write", "syncq_wait_read", "syncq_wait_write", "asyncq_wait_read", "asyncq_wait_write", "scrub_wait",
 		"syncq_read_operations_pend", "syncq_read_operations_activ", "syncq_write_operations_pend", "syncq_write_operations_activ",
 		"asyncq_read_operations_pend", "asyncq_read_operations_activ", "asyncq_write_operations_pend", "asyncq_write_operations_activ",
 		"scrubq_read_pend", "scrubq_read_activ",
@@ -341,21 +347,22 @@ func (z *Zfs) getZpoolIostats(numberOfPools int) (map[string]map[string]interfac
 			if linesCount < numberOfPools {
 				time.Sleep(time.Millisecond * 100)
 			} else {
+				fmt.Printf("Stop reading zpool iostat lines, read %v\n", linesCount)
 				moreLines = false
 			}
 		}
 
 	}
 	if linesCount > 0 {
-//		fieldsToAverage :=[]string{"syncq_read_operations_pend", "syncq_read_operations_activ", "syncq_write_operations_pend", "syncq_write_operations_activ",
-//			"asyncq_read_operations_pend", "asyncq_read_operations_activ", "asyncq_write_operations_pend", "asyncq_write_operations_activ",
-//			"scrubq_read_pend", "scrubq_read_activ",
-//		}
-//		for poolName, _ := range poolFields {
-//			for _, v := range fieldsToAverage {
-//				poolFields[poolName][v] = poolFields[poolName][v].(int) / linesCount
-//			}
-//		}
+		//		fieldsToAverage :=[]string{"syncq_read_operations_pend", "syncq_read_operations_activ", "syncq_write_operations_pend", "syncq_write_operations_activ",
+		//			"asyncq_read_operations_pend", "asyncq_read_operations_activ", "asyncq_write_operations_pend", "asyncq_write_operations_activ",
+		//			"scrubq_read_pend", "scrubq_read_activ",
+		//		}
+		//		for poolName, _ := range poolFields {
+		//			for _, v := range fieldsToAverage {
+		//				poolFields[poolName][v] = poolFields[poolName][v].(int) / linesCount
+		//			}
+		//		}
 	}
 
 	return poolFields, nil
@@ -415,56 +422,113 @@ func (z *Zfs) Gather(acc telegraf.Accumulator) error {
 	return z.gatherZfsKstats(acc, strings.Join(poolNames, "::"))
 }
 
-//zpool iostat -Hp -l -q -y 1
-const tzpoolIostatContents = `
-rpool	203525095936	116449967616	0	238	0	1612537	-	143137	-	69820	-	3456	-	82830	-	0	0	0	0	0	0	0	0	0	0
-zd01	1041502023680	14901416579072	0	1491	0	164485664	-	77190832	-	5273927	-	4608	-	72408643	-	0	0	0	0	0	0	184	4	0	0
-rpool	203525095936	116449967616	0	0	0	0	-	-	-	-	-	-	-	-	-	0	0	0	0	0	0	0	0	0	0
-zd01	1041502023680	14901416579072	0	1510	0	165553394	-	74766449	-	5269671	-	3328	-	69849836	-	0	0	0	0	0	0	248	6	0	0
-rpool	203525095936	116449967616	0	0	0	0	-	-	-	-	-	-	-	-	-	0	0	0	0	0	0	0	0	0	0
-zd01	1041502023680	14901416579072	0	1476	0	167216354	-	61012954	-	5416006	-	3840	-	56158448	-	0	0	0	0	0	0	271	8	0	0
-rpool	203525095936	116449967616	0	0	0	0	-	-	-	-	-	-	-	-	-	0	0	0	0	0	0	0	0	0	0
-zd01	1041502023680	14901416579072	0	1471	0	163783365	-	80763358	-	5747755	-	4224	-	75404145	-	0	0	0	0	0	0	291	8	0	0
-rpool	203525095936	116449967616	0	0	0	0	-	-	-	-	-	-	-	-	-	0	0	0	0	0	0	0	0	0	0
-zd01	1041502023680	14901416579072	0	1184	0	133041318	-	76985756	-	6452099	-	3072	-	70534877	-	0	0	0	0	0	0	211	6	0	0
-rpool	203523718144	116451345408	0	273	0	1699656	-	169797	-	68276	-	3072	-	103372	-	0	0	0	0	0	0	0	0	0	0
-zd01	1041502023680	14901416579072	0	1275	0	141177045	-	76358227	-	6738397	-	4608	-	70201298	-	0	0	0	0	0	0	226	8	0	0
-rpool	203523718144	116451345408	0	0	0	0	-	-	-	-	-	-	-	-	-	0	0	0	0	0	0	0	0	0	0
-zd01	1041502023680	14901416579072	0	7966	0	1001163487	-	117373966	-	1161228	-	6144	-	116303952	-	0	0	0	0	0	0	4559	12	0	0
-rpool	203523718144	116451345408	0	0	0	0	-	-	-	-	-	-	-	-	-	0	0	0	0	0	0	0	0	0	0
-zd01	1041502023680	14901416579072	0	8009	0	1014721417	-	251578050	-	1199958	-	3072	-	250375641	-	0	0	0	0	0	0	281	8	0	0
-rpool	203523718144	116451345408	0	0	0	0	-	-	-	-	-	-	-	-	-	0	0	0	0	0	0	0	0	0	0
-zd01	1042354585600	14900564017152	0	1338	0	113423258	-	67588940	-	4967609	-	3225	-	64129430	-	0	0	0	0	0	0	0	1	0	0
-rpool	203523718144	116451345408	0	0	0	0	-	-	-	-	-	-	-	-	-	0	0	0	0	0	0	0	0	0	0
-zd01	1042353745920	14900564856832	0	1374	0	133165167	-	62578016	-	5457761	-	2730	-	57825773	-	0	0	0	0	0	0	229	8	0	0
-`
+// read stderr of zpool iostat command
+// proxy it to
+func zpoolIostatStderrReader(stderr io.ReadCloser) {
+	if _, err := io.Copy(os.Stderr, stderr); err != nil {
+		log.Printf("Copy zpool iostat stderr to main stderr error: %v", err)
+	}
+	/*
+		scanner := bufio.NewScanner(stderr)
+		for scanner.Scan() {
+			log.Print(scanner.Text())
+		}
+		if err := scanner.Err(); err != nil {
+			log.Printf("zpool iostat stderr reading error: %v", err)
+		}
+	*/
+}
 
-func zpoolIostat(out chan string, outErr chan error) {
-	lines := strings.Split(tzpoolIostatContents, "\n")
-	for _, line := range lines {
+func zpoolIostat(ctx context.Context, out chan string, outErr chan error) {
+	fmt.Printf("zpoolIostat started\n")
+
+	command := "zpool"
+	args := []string{"iostat", "-Hp", "-l", "-q", "-y", "1"}
+
+	cmd := exec.CommandContext(ctx, command, args...)
+
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		fmt.Printf("Command StderrPipe() error: %v\n", err)
+		outErr <- err
+		return
+	}
+	go zpoolIostatStderrReader(stderr)
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		outErr <- err
+		return
+	}
+
+	err = cmd.Start()
+	if err != nil {
+		fmt.Printf("Command start error: %v\n", err)
+		outErr <- err
+		return
+	}
+
+	fmt.Printf("Command started\n")
+	scanner := bufio.NewScanner(stdout)
+	for scanner.Scan() {
+		line := scanner.Text()
+		fmt.Printf("Command stdout read %s\n", line)
 		out <- line
 	}
-	return
+	fmt.Printf("Command stdout read\n")
+
+	if err := scanner.Err(); err != nil {
+		outErr <- err
+		return
+	}
+
+	err = cmd.Wait()
+	if execErr, ok := err.(*exec.Error); ok {
+		outErr <- fmt.Errorf("%s was not found or not executable. Wrapped error: %s", execErr.Name, execErr.Err)
+		return
+	}
+	if exiterr, ok := err.(*exec.ExitError); ok {
+		if status, ok := exiterr.Sys().(syscall.WaitStatus); ok {
+			log.Printf("zpool iostat exit, Exit Status: %d", status.ExitStatus())
+		}
+		return
+	} else {
+		outErr <- fmt.Errorf("Wait() returned unknown error: %#v", err)
+	}
 }
 
 func (z *Zfs) Start(acc telegraf.Accumulator) error {
 	if z.PoolIostatMetrics {
 		z.zpoolIostatError = make(chan error, 1)
 		z.zpoolIostatSource = make(chan string, ZpoolIostatBufferSize)
-		go z.zpoolIostat(z.zpoolIostatSource, z.zpoolIostatError)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		go z.zpoolIostat(ctx, z.zpoolIostatSource, z.zpoolIostatError)
+
+		z.zpoolIostatCancelFunc = cancel
+
+		go func() {
+			err := <-z.zpoolIostatError
+			log.Printf("zpoolIostat return error:%v, restarting it", err)
+			z.Stop()
+			z.Start(acc)
+		}()
 	}
 	return nil
 }
 
-//TODO: implement stop of zpool iostat
 func (z *Zfs) Stop() {
+	if z.zpoolIostatCancelFunc != nil {
+		fmt.Printf("Cancelling zpool iostat\n")
+		z.zpoolIostatCancelFunc()
+	}
 }
 
 func init() {
 	inputs.Add("zfs", func() telegraf.Input {
 		return &Zfs{
-			zpool: zpool, 
-			zpoolIostat: zpoolIostat, 
+			zpool:       zpool,
+			zpoolIostat: zpoolIostat,
 		}
 	})
 }
