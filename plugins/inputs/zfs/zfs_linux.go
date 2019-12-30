@@ -21,6 +21,8 @@ import (
 	"github.com/influxdata/telegraf/plugins/inputs"
 )
 
+// zpool iostat buffer should be big enough to keep one line per zfs pool per second
+// for the duration of interval (10 second by default)
 const ZpoolIostatBufferSize = 1000
 
 type poolInfo struct {
@@ -127,7 +129,6 @@ func (z *Zfs) gatherZfsKstats(acc telegraf.Accumulator, poolNames string) error 
 func parseZpoolIostatLine(line string) (map[string]interface{}, error) {
 	col := strings.Split(line, "\t")
 	if len(col) == 1 {
-		//empty line, just skip
 		return nil, nil
 	}
 
@@ -139,155 +140,40 @@ func parseZpoolIostatLine(line string) (map[string]interface{}, error) {
 
 	fields := map[string]interface{}{"name": col[0]}
 
-	alloc, err := strconv.ParseInt(col[1], 10, 64)
-	if err != nil {
-		return fields, fmt.Errorf("Error parsing alloc: %s", err)
+	fieldsToParse := map[string]int{
+		"iostat_alloc":                  1,
+		"iostat_free":                   2,
+		"operations_read":               3,
+		"operations_write":              4,
+		"bandwidth_read":                5,
+		"bandwidth_write":               6,
+		"total_wait_read":               7,
+		"total_wait_write":              8,
+		"disk_wait_read":                9,
+		"disk_wait_write":               10,
+		"syncq_wait_read":               11,
+		"syncq_wait_write":              12,
+		"asyncq_wait_read":              13,
+		"asyncq_wait_write":             14,
+		"scrub_wait":                    15,
+		"syncq_read_operations_pend":    16,
+		"syncq_read_operations_activ":   17,
+		"syncq_write_operations_pend":   18,
+		"syncq_write_operations_activ":  19,
+		"asyncq_read_operations_pend":   20,
+		"asyncq_read_operations_activ":  21,
+		"asyncq_write_operations_pend":  22,
+		"asyncq_write_operations_activ": 23,
+		"scrubq_read_pend":              24,
+		"scrubq_read_activ":             25,
 	}
-	fields["iostat_alloc"] = alloc
-
-	free, err := strconv.ParseInt(col[2], 10, 64)
-	if err != nil {
-		return fields, fmt.Errorf("Error parsing free: %s", err)
+	for k, position := range fieldsToParse {
+		v, err := strconv.ParseInt(col[position], 10, 64)
+		if err != nil {
+			return fields, fmt.Errorf("Error parsing %s: \"%s\" can not be parsed into int. Error: %v", k, col[position], err)
+		}
+		fields[k] = v
 	}
-	fields["iostat_free"] = free
-
-	operationsRead, err := strconv.ParseInt(col[3], 10, 64)
-	if err != nil {
-		return fields, fmt.Errorf("Error parsing operations->read: %s", err)
-	}
-	fields["operations_read"] = operationsRead
-
-	operationsWrite, err := strconv.ParseInt(col[4], 10, 64)
-	if err != nil {
-		return fields, fmt.Errorf("Error parsing operations->write: %s", err)
-	}
-	fields["operations_write"] = operationsWrite
-
-	bandwidthRead, err := strconv.ParseInt(col[5], 10, 64)
-	if err != nil {
-		return fields, fmt.Errorf("Error parsing bandwidth->read: %s", err)
-	}
-	fields["bandwidth_read"] = bandwidthRead
-
-	bandwidthWrite, err := strconv.ParseInt(col[6], 10, 64)
-	if err != nil {
-		return fields, fmt.Errorf("Error parsing bandwidth->write: %s", err)
-	}
-	fields["bandwidth_write"] = bandwidthWrite
-
-	totalWaitRead, err := strconv.ParseInt(col[7], 10, 64)
-	if err != nil {
-		return fields, fmt.Errorf("Error parsing total_wait->read: %s", err)
-	}
-	fields["total_wait_read"] = totalWaitRead
-
-	totalWaitWrite, err := strconv.ParseInt(col[8], 10, 64)
-	if err != nil {
-		return fields, fmt.Errorf("Error parsing total_wait->write: %s", err)
-	}
-	fields["total_wait_write"] = totalWaitWrite
-
-	diskWaitRead, err := strconv.ParseInt(col[9], 10, 64)
-	if err != nil {
-		return fields, fmt.Errorf("Error parsing disk_wait->read: %s", err)
-	}
-	fields["disk_wait_read"] = diskWaitRead
-
-	diskWaitWrite, err := strconv.ParseInt(col[10], 10, 64)
-	if err != nil {
-		return fields, fmt.Errorf("Error parsing disk_wait->write: %s", err)
-	}
-	fields["disk_wait_write"] = diskWaitWrite
-
-	syncqWaitRead, err := strconv.ParseInt(col[11], 10, 64)
-	if err != nil {
-		return fields, fmt.Errorf("Error parsing syncq_wait->read: %s", err)
-	}
-	fields["syncq_wait_read"] = syncqWaitRead
-
-	syncqWaitWrite, err := strconv.ParseInt(col[12], 10, 64)
-	if err != nil {
-		return fields, fmt.Errorf("Error parsing syncq_wait->write: %s", err)
-	}
-	fields["syncq_wait_write"] = syncqWaitWrite
-
-	asyncqWaitRead, err := strconv.ParseInt(col[13], 10, 64)
-	if err != nil {
-		return fields, fmt.Errorf("Error parsing asyncq_wait->read: %s", err)
-	}
-	fields["asyncq_wait_read"] = asyncqWaitRead
-
-	asyncqWaitWrite, err := strconv.ParseInt(col[14], 10, 64)
-	if err != nil {
-		return fields, fmt.Errorf("Error parsing asyncq_wait->write: %s", err)
-	}
-	fields["asyncq_wait_write"] = asyncqWaitWrite
-
-	scrubWait, err := strconv.ParseInt(col[15], 10, 64)
-	if err != nil {
-		return fields, fmt.Errorf("Error parsing scrub_wait: %s", err)
-	}
-	fields["scrub_wait"] = scrubWait
-
-	syncqReadOperationsPend, err := strconv.ParseInt(col[16], 10, 64)
-	if err != nil {
-		return fields, fmt.Errorf("Error parsing syncq_read_operations->pend: %s", err)
-	}
-	fields["syncq_read_operations_pend"] = syncqReadOperationsPend
-
-	syncqReadOperationsActiv, err := strconv.ParseInt(col[17], 10, 64)
-	if err != nil {
-		return fields, fmt.Errorf("Error parsing syncq_read_operations->activ: %s", err)
-	}
-	fields["syncq_read_operations_activ"] = syncqReadOperationsActiv
-
-	syncqWriteOperationsPend, err := strconv.ParseInt(col[18], 10, 64)
-	if err != nil {
-		return fields, fmt.Errorf("Error parsing syncq_write_operations->pend: %s", err)
-	}
-	fields["syncq_write_operations_pend"] = syncqWriteOperationsPend
-
-	syncqWriteOperationsActiv, err := strconv.ParseInt(col[19], 10, 64)
-	if err != nil {
-		return fields, fmt.Errorf("Error parsing syncq_write_operations->activ: %s", err)
-	}
-	fields["syncq_write_operations_activ"] = syncqWriteOperationsActiv
-
-	asyncqReadOperationsPend, err := strconv.ParseInt(col[20], 10, 64)
-	if err != nil {
-		return fields, fmt.Errorf("Error parsing asyncq_read_operations->pend: %s", err)
-	}
-	fields["asyncq_read_operations_pend"] = asyncqReadOperationsPend
-
-	asyncqReadOperationsActiv, err := strconv.ParseInt(col[21], 10, 64)
-	if err != nil {
-		return fields, fmt.Errorf("Error parsing asyncq_read_operations->activ: %s", err)
-	}
-	fields["asyncq_read_operations_activ"] = asyncqReadOperationsActiv
-
-	asyncqWriteOperationsPend, err := strconv.ParseInt(col[22], 10, 64)
-	if err != nil {
-		return fields, fmt.Errorf("Error parsing asyncq_write_operations->pend: %s", err)
-	}
-	fields["asyncq_write_operations_pend"] = asyncqWriteOperationsPend
-
-	asyncqWriteOperationsActiv, err := strconv.ParseInt(col[23], 10, 64)
-	if err != nil {
-		return fields, fmt.Errorf("Error parsing asyncq_write_operations->activ: %s", err)
-	}
-	fields["asyncq_write_operations_activ"] = asyncqWriteOperationsActiv
-
-	scrubqReadPend, err := strconv.ParseInt(col[24], 10, 64)
-	if err != nil {
-		return fields, fmt.Errorf("Error parsing scrubq_read->pend: %s", err)
-	}
-	fields["scrubq_read_pend"] = scrubqReadPend
-
-	scrubqReadActiv, err := strconv.ParseInt(col[25], 10, 64)
-	if err != nil {
-		return fields, fmt.Errorf("Error parsing scrubq_read->activ: %s", err)
-	}
-	fields["scrubq_read_activ"] = scrubqReadActiv
 
 	return fields, nil
 }
@@ -308,6 +194,7 @@ func sumIostatsLines(exist map[string]interface{}, added map[string]interface{})
 	return exist
 }
 
+//Parse and aggregate zpool iostat output
 func (z *Zfs) getZpoolIostats(numberOfPools int) (map[string]map[string]interface{}, error) {
 
 	poolFields := map[string]map[string]interface{}{}
@@ -324,7 +211,6 @@ func (z *Zfs) getZpoolIostats(numberOfPools int) (map[string]map[string]interfac
 			if fields, err := parseZpoolIostatLine(line); err != nil {
 				return poolFields, err
 			} else {
-				//empty line
 				if fields == nil {
 					break
 				}
@@ -342,30 +228,98 @@ func (z *Zfs) getZpoolIostats(numberOfPools int) (map[string]map[string]interfac
 				}
 			}
 		default:
-			// We need to pool from zpool iostat at least one line for every zfs pool
-			// if for varyous reasons we pooled less than that we should continue pooling
+			// We need to pull from "zpool iostat" at least one line for every zfs pool
+			// if for whatever reasons we pulled less then we should continue pulling
 			if linesCount < numberOfPools {
 				time.Sleep(time.Millisecond * 100)
 			} else {
-				fmt.Printf("Stop reading zpool iostat lines, read %v\n", linesCount)
 				moreLines = false
 			}
 		}
 
 	}
-	if linesCount > 0 {
-		//		fieldsToAverage :=[]string{"syncq_read_operations_pend", "syncq_read_operations_activ", "syncq_write_operations_pend", "syncq_write_operations_activ",
-		//			"asyncq_read_operations_pend", "asyncq_read_operations_activ", "asyncq_write_operations_pend", "asyncq_write_operations_activ",
-		//			"scrubq_read_pend", "scrubq_read_activ",
-		//		}
-		//		for poolName, _ := range poolFields {
-		//			for _, v := range fieldsToAverage {
-		//				poolFields[poolName][v] = poolFields[poolName][v].(int) / linesCount
-		//			}
-		//		}
-	}
+
+	// metrics mentioned below are gauges, measured every second, not incremental counters
+	// maybe its better to calculate average values ?
+	//	if linesCount > 0 {
+	//		fieldsToAverage :=[]string{"syncq_read_operations_pend", "syncq_read_operations_activ", "syncq_write_operations_pend", "syncq_write_operations_activ",
+	//			"asyncq_read_operations_pend", "asyncq_read_operations_activ", "asyncq_write_operations_pend", "asyncq_write_operations_activ",
+	//			"scrubq_read_pend", "scrubq_read_activ",
+	//		}
+	//		for poolName, _ := range poolFields {
+	//			for _, v := range fieldsToAverage {
+	//				poolFields[poolName][v] = poolFields[poolName][v].(int) / linesCount
+	//			}
+	//		}
+	//	}
 
 	return poolFields, nil
+}
+
+// proxy stderr of "zpool iostat" to the main process stderr
+// just to make sure we do not hide any error message
+func zpoolIostatStderrReader(stderr io.ReadCloser) {
+	if _, err := io.Copy(os.Stderr, stderr); err != nil {
+		log.Printf("Copy zpool iostat stderr to main stderr error: %v", err)
+	}
+}
+
+// run zpool iostat -Hp -l -q -y 1 in background
+// this command emit one line per zsf pool every second
+func zpoolIostat(ctx context.Context, out chan string, outErr chan error) {
+	command := "zpool"
+	args := []string{"iostat", "-Hp", "-l", "-q", "-y", "1"}
+
+	cmd := exec.CommandContext(ctx, command, args...)
+
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		fmt.Printf("Command StderrPipe() error: %v\n", err)
+		outErr <- err
+		return
+	}
+	go zpoolIostatStderrReader(stderr)
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		outErr <- err
+		return
+	}
+
+	err = cmd.Start()
+	if err != nil {
+		fmt.Printf("Command start error: %v\n", err)
+		outErr <- err
+		return
+	}
+
+	scanner := bufio.NewScanner(stdout)
+	for scanner.Scan() {
+		line := scanner.Text()
+		fmt.Printf("Command stdout read %s\n", line)
+		out <- line
+	}
+	fmt.Printf("Command stdout read\n")
+
+	if err := scanner.Err(); err != nil {
+		outErr <- err
+		return
+	}
+
+	err = cmd.Wait()
+	if execErr, ok := err.(*exec.Error); ok {
+		outErr <- fmt.Errorf("%s was not found or not executable. Wrapped error: %s", execErr.Name, execErr.Err)
+		return
+	}
+	if exiterr, ok := err.(*exec.ExitError); ok {
+		if status, ok := exiterr.Sys().(syscall.WaitStatus); ok {
+			log.Printf("zpool iostat exit, Exit Status: %d", status.ExitStatus())
+		}
+		return
+	} else {
+		outErr <- fmt.Errorf("Wait() returned unknown error: %#v", err)
+		return
+	}
 }
 
 func (z *Zfs) Gather(acc telegraf.Accumulator) error {
@@ -378,13 +332,11 @@ func (z *Zfs) Gather(acc telegraf.Accumulator) error {
 
 	poolNames := []string{}
 	pools := getPools(z.getKstatPath())
-	//fmt.Printf("Pools:%v\n", pools)
 
 	poolIostatsFields, err := z.getZpoolIostats(len(pools))
 	if err != nil {
 		return err
 	}
-	//fmt.Printf("PoolIostatFields: %#v\n", poolIostatsFields)
 
 	for _, pool := range pools {
 		poolNames = append(poolNames, pool.name)
@@ -412,8 +364,6 @@ func (z *Zfs) Gather(acc telegraf.Accumulator) error {
 				delete(fields, "name")
 				delete(fields, "health")
 
-				//fmt.Printf("Fields: %v\n", fields)
-				//fmt.Printf("Tags: %v\n", tags)
 				acc.AddFields("zfs_pool", fields, tags)
 			}
 		}
@@ -422,91 +372,24 @@ func (z *Zfs) Gather(acc telegraf.Accumulator) error {
 	return z.gatherZfsKstats(acc, strings.Join(poolNames, "::"))
 }
 
-// read stderr of zpool iostat command
-// proxy it to
-func zpoolIostatStderrReader(stderr io.ReadCloser) {
-	if _, err := io.Copy(os.Stderr, stderr); err != nil {
-		log.Printf("Copy zpool iostat stderr to main stderr error: %v", err)
-	}
-	/*
-		scanner := bufio.NewScanner(stderr)
-		for scanner.Scan() {
-			log.Print(scanner.Text())
-		}
-		if err := scanner.Err(); err != nil {
-			log.Printf("zpool iostat stderr reading error: %v", err)
-		}
-	*/
-}
-
-func zpoolIostat(ctx context.Context, out chan string, outErr chan error) {
-	fmt.Printf("zpoolIostat started\n")
-
-	command := "zpool"
-	args := []string{"iostat", "-Hp", "-l", "-q", "-y", "1"}
-
-	cmd := exec.CommandContext(ctx, command, args...)
-
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		fmt.Printf("Command StderrPipe() error: %v\n", err)
-		outErr <- err
-		return
-	}
-	go zpoolIostatStderrReader(stderr)
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		outErr <- err
-		return
-	}
-
-	err = cmd.Start()
-	if err != nil {
-		fmt.Printf("Command start error: %v\n", err)
-		outErr <- err
-		return
-	}
-
-	fmt.Printf("Command started\n")
-	scanner := bufio.NewScanner(stdout)
-	for scanner.Scan() {
-		line := scanner.Text()
-		fmt.Printf("Command stdout read %s\n", line)
-		out <- line
-	}
-	fmt.Printf("Command stdout read\n")
-
-	if err := scanner.Err(); err != nil {
-		outErr <- err
-		return
-	}
-
-	err = cmd.Wait()
-	if execErr, ok := err.(*exec.Error); ok {
-		outErr <- fmt.Errorf("%s was not found or not executable. Wrapped error: %s", execErr.Name, execErr.Err)
-		return
-	}
-	if exiterr, ok := err.(*exec.ExitError); ok {
-		if status, ok := exiterr.Sys().(syscall.WaitStatus); ok {
-			log.Printf("zpool iostat exit, Exit Status: %d", status.ExitStatus())
-		}
-		return
-	} else {
-		outErr <- fmt.Errorf("Wait() returned unknown error: %#v", err)
-	}
-}
-
 func (z *Zfs) Start(acc telegraf.Accumulator) error {
 	if z.PoolIostatMetrics {
-		z.zpoolIostatError = make(chan error, 1)
 		z.zpoolIostatSource = make(chan string, ZpoolIostatBufferSize)
 
+		// We make errors channel buffered to avoid deadlocks
+		// in zpoolIostat() we report just one error and return, so make(chan error, 1) is enough
+		// if we are going to return more than one error its better to increase the channel buffer size
+		z.zpoolIostatError = make(chan error, 1)
+
 		ctx, cancel := context.WithCancel(context.Background())
+
+		// run zpool iostat collector in separate goroutine
 		go z.zpoolIostat(ctx, z.zpoolIostatSource, z.zpoolIostatError)
 
 		z.zpoolIostatCancelFunc = cancel
 
+		// watchdog goroutine
+		// in case of any failure collect the error and restart zpool iostat
 		go func() {
 			err := <-z.zpoolIostatError
 			log.Printf("zpoolIostat return error:%v, restarting it", err)
@@ -519,7 +402,6 @@ func (z *Zfs) Start(acc telegraf.Accumulator) error {
 
 func (z *Zfs) Stop() {
 	if z.zpoolIostatCancelFunc != nil {
-		fmt.Printf("Cancelling zpool iostat\n")
 		z.zpoolIostatCancelFunc()
 	}
 }

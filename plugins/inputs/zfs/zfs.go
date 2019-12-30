@@ -14,15 +14,19 @@ type Zpool func() ([]string, error)
 type ZpoolIostat func(ctx context.Context, out chan string, outErr chan error)
 
 type Zfs struct {
-	KstatPath             string
-	KstatMetrics          []string
-	PoolMetrics           bool
-	PoolIostatMetrics     bool
-	sysctl                Sysctl
-	zpool                 Zpool
-	zpoolIostat           ZpoolIostat
-	zpoolIostatSource     chan string
-	zpoolIostatError      chan error
+	KstatPath         string
+	KstatMetrics      []string
+	PoolMetrics       bool
+	PoolIostatMetrics bool
+	sysctl            Sysctl
+	zpool             Zpool
+	zpoolIostat       ZpoolIostat
+
+	// channel for "zpool iostat" output, one line per message
+	zpoolIostatSource chan string
+	zpoolIostatError  chan error
+	// "zpool iostat" context's cancel function
+	// Used to implement Stop()
 	zpoolIostatCancelFunc context.CancelFunc
 }
 
@@ -40,7 +44,7 @@ var sampleConfig = `
   ## By default, don't gather zpool stats
   ## Before turning it on, please, check that zpool is available from $PATH
   # poolMetrics = false
-  ## By default, don't gather zpool stats
+  ## By default, don't gather "zpool iostat" metrics
   # poolIostatMetrics = false
 `
 
@@ -48,6 +52,34 @@ func (z *Zfs) SampleConfig() string {
 	return sampleConfig
 }
 
+func (z *Zfs) Description() string {
+	return "Read metrics of ZFS from arcstats, zfetchstats, vdev_cache_stats, and pools"
+}
+
+func run(command string, args ...string) ([]string, error) {
+	cmd := exec.Command(command, args...)
+	var outbuf, errbuf bytes.Buffer
+	cmd.Stdout = &outbuf
+	cmd.Stderr = &errbuf
+	err := cmd.Run()
+
+	stdout := strings.TrimSpace(outbuf.String())
+	stderr := strings.TrimSpace(errbuf.String())
+
+	if execErr, ok := err.(*exec.Error); ok {
+		return nil, fmt.Errorf("%s was not found or not executable. Wrapped error: %s", execErr.Name, execErr.Err)
+	}
+	if _, ok := err.(*exec.ExitError); ok {
+		return nil, fmt.Errorf("%s error: %s", command, stderr)
+	}
+	return strings.Split(stdout, "\n"), nil
+}
+
+func zpool() ([]string, error) {
+	return run("zpool", []string{"list", "-Hp", "-o", "name,health,size,alloc,free,fragmentation,capacity,dedupratio,freeing,leaked"}...)
+}
+
+//Parse "zpool list" output
 func (z *Zfs) getZpoolStats() (map[string]map[string]interface{}, error) {
 
 	poolFields := map[string]map[string]interface{}{}
@@ -128,31 +160,4 @@ func (z *Zfs) getZpoolStats() (map[string]map[string]interface{}, error) {
 		poolFields[name] = fields
 	}
 	return poolFields, nil
-}
-
-func (z *Zfs) Description() string {
-	return "Read metrics of ZFS from arcstats, zfetchstats, vdev_cache_stats, and pools"
-}
-
-func run(command string, args ...string) ([]string, error) {
-	cmd := exec.Command(command, args...)
-	var outbuf, errbuf bytes.Buffer
-	cmd.Stdout = &outbuf
-	cmd.Stderr = &errbuf
-	err := cmd.Run()
-
-	stdout := strings.TrimSpace(outbuf.String())
-	stderr := strings.TrimSpace(errbuf.String())
-
-	if execErr, ok := err.(*exec.Error); ok {
-		return nil, fmt.Errorf("%s was not found or not executable. Wrapped error: %s", execErr.Name, execErr.Err)
-	}
-	if _, ok := err.(*exec.ExitError); ok {
-		return nil, fmt.Errorf("%s error: %s", command, stderr)
-	}
-	return strings.Split(stdout, "\n"), nil
-}
-
-func zpool() ([]string, error) {
-	return run("zpool", []string{"list", "-Hp", "-o", "name,health,size,alloc,free,fragmentation,capacity,dedupratio,freeing,leaked"}...)
 }
