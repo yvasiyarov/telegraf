@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -182,14 +183,10 @@ func sumIostatsLines(exist map[string]interface{}, added map[string]interface{})
 	exist["iostat_alloc"] = added["iostat_alloc"]
 	exist["iostat_free"] = added["iostat_free"]
 
-	fieldsToSum := []string{"operations_read", "operations_write", "bandwidth_read", "bandwidth_write", "total_wait_read", "total_wait_write",
-		"disk_wait_read", "disk_wait_write", "syncq_wait_read", "syncq_wait_write", "asyncq_wait_read", "asyncq_wait_write", "scrub_wait",
-		"syncq_read_operations_pend", "syncq_read_operations_activ", "syncq_write_operations_pend", "syncq_write_operations_activ",
-		"asyncq_read_operations_pend", "asyncq_read_operations_activ", "asyncq_write_operations_pend", "asyncq_write_operations_activ",
-		"scrubq_read_pend", "scrubq_read_activ",
-	}
-	for _, v := range fieldsToSum {
-		exist[v] = exist[v].(int64) + added[v].(int64)
+	for k, v := range exist {
+		if k != "iostat_alloc" && k != "iostat_free" && k != "name" {
+			exist[k] = v.(int64) + added[k].(int64)
+		}
 	}
 	return exist
 }
@@ -219,9 +216,9 @@ func (z *Zfs) getZpoolIostats(numberOfPools int) (map[string]map[string]interfac
 					return poolFields, fmt.Errorf("Can not parse pool name from string %s", line)
 				} else {
 					nameAsString := name.(string)
+					linesCount++
 					if existsPoolStats, ok := poolFields[nameAsString]; ok {
 						poolFields[nameAsString] = sumIostatsLines(existsPoolStats, fields)
-						linesCount++
 					} else {
 						poolFields[nameAsString] = fields
 					}
@@ -237,22 +234,22 @@ func (z *Zfs) getZpoolIostats(numberOfPools int) (map[string]map[string]interfac
 			}
 		}
 
+		// we wanna linesCount be multiple of numberOfPools
+		if (linesCount%numberOfPools == 0) && (len(z.zpoolIostatSource) < numberOfPools) {
+			break
+		}
+
 	}
 
-	// metrics mentioned below are gauges, measured every second, not incremental counters
-	// maybe its better to calculate average values ?
-	//	if linesCount > 0 {
-	//		fieldsToAverage :=[]string{"syncq_read_operations_pend", "syncq_read_operations_activ", "syncq_write_operations_pend", "syncq_write_operations_activ",
-	//			"asyncq_read_operations_pend", "asyncq_read_operations_activ", "asyncq_write_operations_pend", "asyncq_write_operations_activ",
-	//			"scrubq_read_pend", "scrubq_read_activ",
-	//		}
-	//		for poolName, _ := range poolFields {
-	//			for _, v := range fieldsToAverage {
-	//				poolFields[poolName][v] = poolFields[poolName][v].(int) / linesCount
-	//			}
-	//		}
-	//	}
+	linesPerPool := float64(linesCount / numberOfPools)
 
+	for poolName, _ := range poolFields {
+		for k, v := range poolFields[poolName] {
+			if k != "iostat_free" && k != "iostat_alloc" && k != "name" {
+				poolFields[poolName][k] = int64(math.Round(float64(v.(int64)) / linesPerPool))
+			}
+		}
+	}
 	return poolFields, nil
 }
 
@@ -296,10 +293,8 @@ func zpoolIostat(ctx context.Context, out chan string, outErr chan error) {
 	scanner := bufio.NewScanner(stdout)
 	for scanner.Scan() {
 		line := scanner.Text()
-		fmt.Printf("Command stdout read %s\n", line)
 		out <- line
 	}
-	fmt.Printf("Command stdout read\n")
 
 	if err := scanner.Err(); err != nil {
 		outErr <- err
@@ -373,6 +368,7 @@ func (z *Zfs) Gather(acc telegraf.Accumulator) error {
 }
 
 func (z *Zfs) Start(acc telegraf.Accumulator) error {
+
 	if z.PoolIostatMetrics {
 		z.zpoolIostatSource = make(chan string, ZpoolIostatBufferSize)
 
